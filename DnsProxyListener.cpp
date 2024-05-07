@@ -691,7 +691,6 @@ IsUidBlockedFn resolveIsUidNetworkingBlockedFn() {
     const int ret = (*ADnsHelper_init)();
     if (ret) {
         LOG(ERROR) << __func__ << ": ADnsHelper_init failed " << strerror(-ret);
-        abort();
     }
 
     IsUidBlockedFn f =
