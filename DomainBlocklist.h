@@ -9,10 +9,10 @@
 #include <cstring>
 #include <fstream>
 #include <mutex>
-#include <sstream>
 #include <string>
-#include <vector>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace dumberos {
 
@@ -31,7 +31,7 @@ class DomainBlocklist {
         if (!name.empty() && name.back() == '.') name.pop_back();
         for (const auto& domain : mDomains) {
             if (name == domain || (name.size() > domain.size() &&
-                name.compare(name.size() - domain.size(), domain.size(), domain) == 0 &&
+                name.ends_with(domain) &&
                 name[name.size() - domain.size() - 1] == '.')) return true;
         }
         return false;
@@ -66,24 +66,18 @@ class DomainBlocklist {
         mInvalid = false;
     }
 
-    static bool validDomain(const std::string& value) {
-        if (value.size() < 3 || value.size() > 253 || value.find('.') == std::string::npos)
+    static bool validDomain(std::string_view value) {
+        if (value.size() < 3 || value.size() > 253 || value.find('.') == value.npos ||
+            value.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789.-") != value.npos)
             return false;
-        size_t length = 0;
-        char previous = '.';
-        for (char c : value) {
-            if (c == '.') {
-                if (!length || length > 63 || previous == '-') return false;
-                length = 0;
-            } else {
-                if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'))
-                    return false;
-                if (!length && c == '-') return false;
-                ++length;
-            }
-            previous = c;
+        for (;;) {
+            const size_t dot = value.find('.');
+            const auto label = value.substr(0, dot);
+            if (label.empty() || label.size() > 63 || label.front() == '-' || label.back() == '-')
+                return false;
+            if (dot == value.npos) return true;
+            value.remove_prefix(dot + 1);
         }
-        return length > 0 && length <= 63 && previous != '-';
     }
 
     std::string mPath;
@@ -119,14 +113,10 @@ inline int blockedDomainResponse(DomainBlocklist& list, const uint8_t* query, si
         const int encoded = dn_comp(ns_rr_name(question), answer + NS_HFIXEDSZ,
                                     answerSize - NS_HFIXEDSZ - NS_QFIXEDSZ, nullptr, nullptr);
         if (encoded < 0) return -EMSGSIZE;
-        uint8_t* end = answer + NS_HFIXEDSZ + encoded;
-        const unsigned type = ns_rr_type(question);
-        const unsigned klass = ns_rr_class(question);
-        *end++ = type >> 8;
-        *end++ = type;
-        *end++ = klass >> 8;
-        *end++ = klass;
-        return end - answer;
+        uint8_t* fields = answer + NS_HFIXEDSZ + encoded;
+        ns_put16(ns_rr_type(question), fields);
+        ns_put16(ns_rr_class(question), fields + NS_INT16SZ);
+        return NS_HFIXEDSZ + encoded + NS_QFIXEDSZ;
     }
     return 0;
 }
