@@ -108,6 +108,7 @@
 #include "Experiments.h"
 #include "PrivateDnsConfiguration.h"
 #include "netd_resolv/resolv.h"
+#include "DomainBlocklist.h"
 #include "private/android_filesystem_config.h"
 
 #include "doh.h"
@@ -447,6 +448,14 @@ int res_nsend(ResState* statp, span<const uint8_t> msg, span<uint8_t> ans, int* 
         return -EINVAL;
     }
     res_pquery(msg);
+
+    static dumberos::DomainBlocklist blocklist;
+    const int blocked = dumberos::blockedDomainResponse(
+            blocklist, msg.data(), msg.size(), ans.data(), ans.size());
+    if (blocked != 0) {
+        if (blocked > 0) *rcode = ns_r_nxdomain;
+        return blocked;
+    }
 
     int anslen = 0;
     Stopwatch cacheStopwatch;
