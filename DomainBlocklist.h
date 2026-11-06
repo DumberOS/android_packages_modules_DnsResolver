@@ -55,14 +55,20 @@ class DomainBlocklist {
         mDomains.clear();
         if (!S_ISREG(current.st_mode) || current.st_size > 65536) return;
         std::ifstream input(mPath);
-        if (!input.is_open()) return;
+        if (!input.is_open()) {
+            mLoaded = false;  // Retry transient I/O failures even when metadata is unchanged.
+            return;
+        }
         std::string line;
         while (std::getline(input, line)) {
             if (line.empty()) continue;
             if (!validDomain(line) || mDomains.size() == 256) return;
             mDomains.push_back(line);
         }
-        if (input.bad()) return;
+        if (input.bad()) {
+            mLoaded = false;
+            return;
+        }
         mInvalid = false;
     }
 

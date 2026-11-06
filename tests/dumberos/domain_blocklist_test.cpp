@@ -1,8 +1,11 @@
 #include "DomainBlocklist.h"
 #include <cassert>
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/resource.h>
 
 int main() {
     const auto path = "/tmp/dumberos-domain-test-" + std::to_string(getpid());
@@ -18,6 +21,21 @@ int main() {
     assert(list.blocks("A.B.EXAMPLE.COM."));
     assert(!list.blocks("badexample.com"));
     assert(!list.blocks("example.com.evil.org"));
+    // Retry an unchanged policy after a temporary descriptor exhaustion.
+    struct rlimit originalLimit;
+    assert(getrlimit(RLIMIT_NOFILE, &originalLimit) == 0);
+    auto limited = originalLimit;
+    limited.rlim_cur = std::min<rlim_t>(originalLimit.rlim_cur, 64);
+    assert(setrlimit(RLIMIT_NOFILE, &limited) == 0);
+    dumberos::DomainBlocklist recovering(path);
+    std::vector<int> descriptors;
+    for (int fd; (fd = open("/dev/null", O_RDONLY)) >= 0;) descriptors.push_back(fd);
+    assert(errno == EMFILE);
+    assert(recovering.blocks("allowed.example.net"));
+    for (int fd : descriptors) assert(close(fd) == 0);
+    assert(setrlimit(RLIMIT_NOFILE, &originalLimit) == 0);
+    assert(!recovering.blocks("allowed.example.net"));
+    assert(recovering.blocks("example.com"));
     uint8_t query[512] {}, answer[512] {};
     auto send = [&](const char* name, int type) {
         const int length = res_mkquery(ns_o_query, name, ns_c_in, type, nullptr, 0, nullptr,
